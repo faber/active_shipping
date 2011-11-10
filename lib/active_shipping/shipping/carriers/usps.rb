@@ -201,7 +201,7 @@ module ActiveMerchant
           root_name = 'DeliveryConfirmationV3.0Request'
           action = :labels
         end
-        puts action
+
         response = build_label_request(root_name, origin, destination, package, options)
         
         # Never use test mode THIS WAY because USPS is just dumb, instead create "certify" version of XML and API name
@@ -513,10 +513,6 @@ module ActiveMerchant
         scheme = USE_SSL[action] ? 'https://' : 'http://'
         host = test ? TEST_DOMAINS[USE_SSL[action]] : LIVE_DOMAINS[USE_SSL[action]]
         resource = test ? TEST_RESOURCE : LIVE_RESOURCE
-        puts "ACTION: #{action}"
-        puts "API_CODE: #{API_CODES[action]}"
-        puts "URL: #{scheme}#{host}/#{resource}?API=#{API_CODES[action]}&XML="
-        puts "#{request}"
         "#{scheme}#{host}/#{resource}?API=#{API_CODES[action]}&XML=#{request}"
       end
       
