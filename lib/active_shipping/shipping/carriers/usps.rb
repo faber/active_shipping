@@ -18,7 +18,13 @@ module ActiveMerchant
       cattr_reader :name
       @@name = "USPS"
       
-      LIVE_DOMAIN = 'production.shippingapis.com'
+      cattr_accessor :label_test_mode
+      
+      # LIVE_DOMAIN = 'production.shippingapis.com'
+      LIVE_DOMAINS = {
+        false => 'production.shippingapis.com',
+        true => 'secure.shippingapis.com'
+      }
       LIVE_RESOURCE = 'ShippingAPI.dll'
       
       TEST_DOMAINS = { #indexed by security; e.g. TEST_DOMAINS[USE_SSL[:rates]]
@@ -31,12 +37,16 @@ module ActiveMerchant
       API_CODES = {
         :us_rates => 'RateV4',
         :world_rates => 'IntlRateV2',
-        :test => 'CarrierPickupAvailability'
+        :test => 'CarrierPickupAvailability',
+        :labels => 'DeliveryConfirmationV3',
+        :test_labels => 'DelivConfirmCertifyV3'
       }
       USE_SSL = {
         :us_rates => false,
         :world_rates => false,
-        :test => true
+        :test => true,
+        :labels => true,
+        :test_labels => true
       }
       CONTAINERS = {
         :envelope => 'Flat Rate Envelope',
@@ -73,6 +83,14 @@ module ActiveMerchant
         :media => 'MEDIA',
         :library => 'LIBRARY',
         :all => 'ALL'
+      }
+      
+      LABEL_SERVICE_TYPES = {
+        :first_class => 'First Class',
+        :priority => 'Priority',
+        :parcel => 'Parcel Post',
+        :media => 'Media Mail',
+        :library => 'Library Mail'
       }
       
       # TODO: get rates for "U.S. possessions and Trust Territories" like Guam, etc. via domestic rates API: http://www.usps.com/ncsc/lookups/abbr_state.txt
@@ -136,6 +154,11 @@ module ActiveMerchant
         at_least_minimum && at_most_maximum
       end
       
+      def initialize(opts={})
+        super
+        self.label_test_mode = opts[:label_test_mode]
+      end
+      
       def requirements
         [:login]
       end
@@ -168,7 +191,68 @@ module ActiveMerchant
         Mass.new(70, :pounds)
       end
       
+      def get_label(origin, destination, package, options={})
+        raise 'Must provide a service type' unless LABEL_SERVICE_TYPES.keys.include?(options[:service_type])
+        
+        if label_test_mode
+          root_name = 'DelivConfirmCertifyV3.0Request'
+          action = :test_labels
+        else
+          root_name = 'DeliveryConfirmationV3.0Request'
+          action = :labels
+        end
+        puts action
+        response = build_label_request(root_name, origin, destination, package, options)
+        
+        # Never use test mode THIS WAY because USPS is just dumb, instead create "certify" version of XML and API name
+        parse_label_response commit(action, response, false)
+        
+      end
+      
       protected
+      
+      def build_label_request(root_name, origin, destination, package, options={})
+        request = XmlNode.new(root_name, :USERID => @options[:login]) do |xml|
+          xml << XmlNode.new('Option', 1)
+          xml << XmlNode.new('ImageParameters', '')
+          xml << XmlNode.new('FromName', origin.name)
+          xml << XmlNode.new('FromFirm', origin.company)
+          xml << XmlNode.new('FromAddress1', origin.address2)
+          xml << XmlNode.new('FromAddress2', origin.address1)
+          xml << XmlNode.new('FromCity', origin.city)
+          xml << XmlNode.new('FromState', origin.state)
+          xml << XmlNode.new('FromZip5', origin.zip)
+          xml << XmlNode.new('FromZip4')
+          xml << XmlNode.new('ToName', destination.name)
+          xml << XmlNode.new('ToFirm', destination.company)
+          xml << XmlNode.new('ToAddress1', destination.address2)
+          xml << XmlNode.new('ToAddress2', destination.address1)
+          xml << XmlNode.new('ToCity', destination.city)
+          xml << XmlNode.new('ToState', destination.state)
+          xml << XmlNode.new('ToZip5', destination.zip)
+          xml << XmlNode.new('ToZip4', '')
+          xml << XmlNode.new('WeightInOunces', package.ounces)
+          xml << XmlNode.new('ServiceType', LABEL_SERVICE_TYPES[options[:service_type]])
+          xml << XmlNode.new('SeparateReceiptPage', options[:separate_receipt] ? 'True' : 'False')
+          xml << XmlNode.new('POZipCode', options[:po_zip_code]||'')
+          xml << XmlNode.new('ImageType', 'TIF')
+          xml << XmlNode.new('LabelDate', options[:label_date].try(:strftime,'%d/%m/%Y')||'')
+          xml << XmlNode.new('CustomerRefNo', options[:ref_no]||'')
+          xml << XmlNode.new('AddressServiceRequested', options[:address_service] ? 'True' : 'False')
+          xml << XmlNode.new('SenderName', options[:sender_name]||'')
+          xml << XmlNode.new('SenderEMail', options[:sender_email]||'')
+          xml << XmlNode.new('RecipientName', options[:recipient_name]||'')
+          xml << XmlNode.new('RecipientEMail', options[:recipient_email]||'')
+        end
+        
+        URI.encode(save_request(request.to_s))
+      end
+      
+      def parse_label_response(response)
+        response
+      end
+      
+      
       
       def us_rates(origin, destination, packages, options={})
         request = build_us_rate_request(packages, origin.zip, destination.zip, options)
@@ -427,8 +511,12 @@ module ActiveMerchant
       
       def request_url(action, request, test)
         scheme = USE_SSL[action] ? 'https://' : 'http://'
-        host = test ? TEST_DOMAINS[USE_SSL[action]] : LIVE_DOMAIN
+        host = test ? TEST_DOMAINS[USE_SSL[action]] : LIVE_DOMAINS[USE_SSL[action]]
         resource = test ? TEST_RESOURCE : LIVE_RESOURCE
+        puts "ACTION: #{action}"
+        puts "API_CODE: #{API_CODES[action]}"
+        puts "URL: #{scheme}#{host}/#{resource}?API=#{API_CODES[action]}&XML="
+        puts "#{request}"
         "#{scheme}#{host}/#{resource}?API=#{API_CODES[action]}&XML=#{request}"
       end
       
