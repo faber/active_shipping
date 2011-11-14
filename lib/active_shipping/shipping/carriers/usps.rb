@@ -191,7 +191,7 @@ module ActiveMerchant
         Mass.new(70, :pounds)
       end
       
-      def get_label(origin, destination, package, options={})
+      def create_shipment(origin, destination, package, options={})
         raise 'Must provide a service type' unless LABEL_SERVICE_TYPES.keys.include?(options[:service_type])
         
         if label_test_mode
@@ -202,14 +202,18 @@ module ActiveMerchant
           action = :labels
         end
 
-        response = build_label_request(root_name, origin, destination, package, options)
+        request = build_label_request(root_name, origin, destination, package, options)
         
         # Never use test mode THIS WAY because USPS is just dumb, instead create "certify" version of XML and API name
-        parse_label_response commit(action, response, false)
+        parse_label_response commit(action, request, false)
         
       end
       
       protected
+      
+      ##=======
+      ## Labels
+      ##=======
       
       def build_label_request(root_name, origin, destination, package, options={})
         request = XmlNode.new(root_name, :USERID => @options[:login]) do |xml|
@@ -235,7 +239,7 @@ module ActiveMerchant
           xml << XmlNode.new('ServiceType', LABEL_SERVICE_TYPES[options[:service_type]])
           xml << XmlNode.new('SeparateReceiptPage', options[:separate_receipt] ? 'True' : 'False')
           xml << XmlNode.new('POZipCode', options[:po_zip_code]||'')
-          xml << XmlNode.new('ImageType', 'TIF')
+          xml << XmlNode.new('ImageType', options[:image_type]||'TIF')
           xml << XmlNode.new('LabelDate', options[:label_date].try(:strftime,'%d/%m/%Y')||'')
           xml << XmlNode.new('CustomerRefNo', options[:ref_no]||'')
           xml << XmlNode.new('AddressServiceRequested', options[:address_service] ? 'True' : 'False')
@@ -249,10 +253,39 @@ module ActiveMerchant
       end
       
       def parse_label_response(response)
-        response
+        xml = Nokogiri::XML(response)
+        response_opts = {:xml => response, :request => last_request}
+        if xml.root.name == 'Error'
+          success = false
+          message = xml.xpath('Error/Description').text
+        else
+          success = true
+          message = ''
+          root = xml.root
+          response_opts[:tracking_number] = root.at('DeliveryConfirmationNumber').text
+          response_opts[:label_data] = Base64.decode64(root.at('DeliveryConfirmationLabel').text)
+          if receipt = root.at('DeliveryConfirmationReceipt')
+            response_opts[:receipt_data] = Base64.decode64(receipt.text)
+          end
+          response_opts[:recipient] = Location.new :country => 'US',
+            :state => root.at('ToState').text,
+            :zip => root.at('ToZip5').text,
+            :zip4 => root.at('ToZip4').text,
+            :address1 => root.at('ToAddress2').text,    ## No this is not a typo, USPS returns what everyone else would call address1 in the
+            :address2 => root.at('ToAddress1').text,    ## address2 field, and vice versa???
+            :name => root.at('ToName').text,
+            :company => root.at('ToFirm').text
+        end
+        ShipmentResponse.new success, 
+          message, 
+          Hash.from_xml(response), 
+          response_opts
+
       end
       
-      
+      ##=======
+      ## Rates
+      ##=======
       
       def us_rates(origin, destination, packages, options={})
         request = build_us_rate_request(packages, origin.zip, destination.zip, options)

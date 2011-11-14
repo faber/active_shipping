@@ -6,6 +6,7 @@ module ActiveMerchant #:nodoc:
       attr_reader :options,
                   :country,
                   :postal_code,
+                  :zip4,
                   :province,
                   :city,
                   :name,
@@ -29,6 +30,7 @@ module ActiveMerchant #:nodoc:
                       options[:country] :
                       ActiveMerchant::Country.find(options[:country])
         @postal_code = options[:postal_code] || options[:postal] || options[:zip]
+        @zip4 = options[:zip4]
         @province = options[:province] || options[:state] || options[:territory] || options[:region]
         @city = options[:city]
         @name = options[:name]
