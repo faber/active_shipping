@@ -27,14 +27,14 @@ module ActiveMerchant #:nodoc:
         File.open(path, 'wb') { |f| f.write(receipt_data) }
       end
       
-      def trimmed_label
+      def trimmed_label_data
         img = Magick::Image.from_blob(label).first
         img.rotate! 270
         img.trim! true
         img.to_blob { self.format = 'PDF' }
       end
       def save_trimmed_label(path)
-        File.open(path, 'wb') { |f| f.write(trimmed_label) }
+        File.open(path, 'wb') { |f| f.write(trimmed_label_data) }
       end
       
       def inspect
